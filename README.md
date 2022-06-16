@@ -1,1 +1,1 @@
-Typescript CHIP8 Emulator
+Typescript CHIP8 Interpreter

@@ -1,1 +1,1 @@
-Typescript CHIP8 Interpreter
+Typescript CHIP-8 Interpreter

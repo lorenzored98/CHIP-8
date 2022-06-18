@@ -1,3 +1,6 @@
+// Chip8 interpreter fully working.
+// Haven't implemented the web audio api to actually hear the sound
+
 const font = [
 	0xf0, 0x90, 0x90, 0x90, 0xf0, 0x20, 0x60, 0x20, 0x20, 0x70, 0xf0, 0x10,
 	0xf0, 0x80, 0xf0, 0xf0, 0x10, 0xf0, 0x10, 0xf0, 0x90, 0x90, 0xf0, 0x10,
@@ -209,21 +212,6 @@ class Chip8 {
 		}
 	}
 
-	push(value: number) {
-		for (let i = this.stack.length - 1; i > 0; i--) {
-			this.stack[i] = this.stack[i - 1];
-		}
-
-		this.stack[0] = value;
-	}
-
-	pop() {
-		for (let i = 1; i < this.stack.length; i++) {
-			this.stack[i - 1] = this.stack[i];
-			this.stack[i] = 0;
-		}
-	}
-
 	cycle() {
 		/**
 		 * Opcodes are 2 bytes, eg. 0xF033. Our memory is 8 bits
@@ -242,21 +230,62 @@ class Chip8 {
 		this.pc += 2;
 
 		// Decoding opcodes
+		// https://en.wikipedia.org/wiki/CHIP-8#Opcode_table
 		switch (this.opcode & 0xf000) {
-			// Clear the screen
-			case 0x00e0: {
-				for (let i = 0; i < this.display.length; i++) {
-					this.display[i] = 0;
+			case 0x0000: {
+				const type = this.opcode & 0x00ff;
+
+				switch (type) {
+					case 0xe0: {
+						for (let i = 0; i < this.display.length; i++) {
+							this.display[i] = 0;
+						}
+						break;
+					}
+					case 0xee: {
+						this.sp--;
+						this.pc = this.stack[this.sp];
+						break;
+					}
+					default:
+						break;
 				}
-				break;
-			}
-			case 0x00ee: {
-				console.log("A");
 				break;
 			}
 			// Jump to adress NNN
 			case 0x1000: {
 				this.pc = this.opcode & 0x0fff;
+				break;
+			}
+			case 0x2000: {
+				const address = this.opcode & 0x0fff;
+				this.stack[this.sp] = this.pc;
+				this.sp++;
+				this.pc = address;
+				break;
+			}
+			case 0x3000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const value = this.opcode & 0x0ff;
+				if (this.registers[x] === value) {
+					this.pc += 2;
+				}
+				break;
+			}
+			case 0x4000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const value = this.opcode & 0x0ff;
+				if (this.registers[x] !== value) {
+					this.pc += 2;
+				}
+				break;
+			}
+			case 0x5000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const y = (this.opcode & 0x00f0) >> 4;
+				if (this.registers[x] === this.registers[y]) {
+					this.pc += 2;
+				}
 				break;
 			}
 			// Set Register value
@@ -273,8 +302,98 @@ class Chip8 {
 				this.registers[x] += nn;
 				break;
 			}
+			case 0x8000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const y = (this.opcode & 0x00f0) >> 4;
+				const type = this.opcode & 0x000f;
+
+				switch (type) {
+					case 0x0: {
+						this.registers[x] = this.registers[y];
+						break;
+					}
+					case 0x1: {
+						this.registers[x] |= this.registers[y];
+						break;
+					}
+					case 0x2: {
+						this.registers[x] &= this.registers[y];
+						break;
+					}
+					case 0x3: {
+						this.registers[x] ^= this.registers[y];
+						break;
+					}
+					case 0x4: {
+						if (
+							this.registers[x] + this.registers[y] >
+							(1 << 8) - 1
+						) {
+							this.registers[0xf] = 1;
+						} else {
+							this.registers[0xf] = 0;
+						}
+						this.registers[x] += this.registers[y];
+						break;
+					}
+					case 0x5: {
+						if (this.registers[x] < this.registers[y]) {
+							this.registers[0xf] = 0;
+						} else {
+							this.registers[0xf] = 1;
+						}
+
+						this.registers[x] -= this.registers[y];
+						break;
+					}
+					case 0x6: {
+						this.registers[0xf] = this.registers[x] & 0b1;
+						this.registers[x] >>= 1;
+						break;
+					}
+					case 0x7: {
+						if (this.registers[y] < this.registers[x]) {
+							this.registers[0xf] = 0;
+						} else {
+							this.registers[0xf] = 1;
+						}
+						this.registers[x] =
+							this.registers[y] - this.registers[x];
+						break;
+					}
+					case 0xe: {
+						this.registers[0xf] =
+							(this.registers[x] & 0b10000000) >> 7;
+						this.registers[x] <<= 1;
+						break;
+					}
+					default:
+						break;
+				}
+
+				break;
+			}
+			case 0x9000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const y = (this.opcode & 0x00f0) >> 4;
+				if (this.registers[x] !== this.registers[y]) {
+					this.pc += 2;
+				}
+				break;
+			}
 			case 0xa000: {
 				this.index = this.opcode & 0x0fff;
+				break;
+			}
+			case 0xb000: {
+				const address = this.opcode & 0xfff;
+				this.pc = address + this.registers[0];
+				break;
+			}
+			case 0xc000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const value = this.opcode & 0x00ff;
+				this.registers[x] = this.random() & value;
 				break;
 			}
 			// Draw
@@ -283,7 +402,7 @@ class Chip8 {
 				const y = this.registers[(this.opcode & 0x00f0) >> 4];
 				const height = this.opcode & 0x000f;
 
-				this.registers[15] = 0;
+				this.registers[0xf] = 0;
 
 				for (let i = 0; i < height; i++) {
 					const value = this.ram[this.index + i];
@@ -297,11 +416,144 @@ class Chip8 {
 							// Checking if I have to flip a bit
 							const dIndex = x + j + (y + i) * 64;
 							if (this.display[dIndex] === 1) {
-								this.registers[15] = 1;
+								this.registers[0xf] = 1;
 							}
 							this.display[dIndex] ^= 1;
 						}
 					}
+				}
+
+				break;
+			}
+			case 0xe000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const type = this.opcode & 0x00ff;
+
+				switch (type) {
+					case 0x9e: {
+						if (this.keypad[this.registers[x]] === 1) {
+							this.pc += 2;
+						}
+						break;
+					}
+					case 0xa1: {
+						if (this.keypad[this.registers[x]] === 0) {
+							this.pc += 2;
+						}
+						break;
+					}
+					default:
+						break;
+				}
+
+				break;
+			}
+			case 0xf000: {
+				const x = (this.opcode & 0x0f00) >> 8;
+				const type = this.opcode & 0x00ff;
+
+				switch (type) {
+					case 0x07: {
+						this.registers[x] = this.delay;
+						break;
+					}
+					case 0x0a: {
+						if (this.keypad[0x0]) {
+							this.registers[x] = 0x0;
+						} else if (this.keypad[0x1]) {
+							this.registers[x] = 0x1;
+						} else if (this.keypad[0x2]) {
+							this.registers[x] = 0x2;
+						} else if (this.keypad[0x3]) {
+							this.registers[x] = 0x3;
+						} else if (this.keypad[0x4]) {
+							this.registers[x] = 0x4;
+						} else if (this.keypad[0x5]) {
+							this.registers[x] = 0x5;
+						} else if (this.keypad[0x6]) {
+							this.registers[x] = 0x6;
+						} else if (this.keypad[0x7]) {
+							this.registers[x] = 0x7;
+						} else if (this.keypad[0x8]) {
+							this.registers[x] = 0x8;
+						} else if (this.keypad[0x9]) {
+							this.registers[x] = 0x9;
+						} else if (this.keypad[0xa]) {
+							this.registers[x] = 0xa;
+						} else if (this.keypad[0xb]) {
+							this.registers[x] = 0xb;
+						} else if (this.keypad[0xc]) {
+							this.registers[x] = 0xc;
+						} else if (this.keypad[0xd]) {
+							this.registers[x] = 0xd;
+						} else if (this.keypad[0xe]) {
+							this.registers[x] = 0xe;
+						} else if (this.keypad[0xf]) {
+							this.registers[x] = 0xf;
+						} else {
+							this.pc -= 2;
+						}
+
+						break;
+					}
+					case 0x15: {
+						this.delay = this.registers[x];
+						break;
+					}
+					case 0x18: {
+						this.sound = this.registers[x];
+						break;
+					}
+					case 0x1e: {
+						this.index += this.registers[x];
+						break;
+					}
+					case 0x29: {
+						const address = 0x50 + x * 5;
+						this.index = address;
+						break;
+					}
+					case 0x33: {
+						let value = this.registers[x];
+
+						let h = 0;
+						let t = 0;
+						let o = 0;
+
+						while (value - 100 >= 0) {
+							value -= 100;
+							h++;
+						}
+
+						while (value - 10 >= 0) {
+							value -= 10;
+							t++;
+						}
+
+						while (value - 1 >= 0) {
+							value -= 1;
+							o++;
+						}
+
+						this.ram[this.index] = h;
+						this.ram[this.index + 1] = t;
+						this.ram[this.index + 2] = o;
+						break;
+					}
+					case 0x55: {
+						for (let i = 0; i <= x; i++) {
+							this.ram[this.index + i] = this.registers[i];
+						}
+						break;
+					}
+					case 0x65: {
+						for (let i = 0; i <= x; i++) {
+							this.registers[i] = this.ram[this.index + i];
+						}
+						break;
+					}
+					default:
+						break;
 				}
 
 				break;
@@ -377,11 +629,11 @@ class Renderer {
 
 const chip8 = new Chip8();
 
-const renderer = new Renderer(12);
+const renderer = new Renderer(8);
 const app = document.getElementById("app") as HTMLElement;
 app.appendChild(renderer.canvas);
 
-const delay = 1000 / 60;
+const delay = 1000 / 700;
 
 let t = 0;
 function main(n = 0) {
@@ -394,4 +646,4 @@ function main(n = 0) {
 	window.requestAnimationFrame(main);
 }
 
-chip8.load("/test_opcode.ch8", main);
+chip8.load("/breakout.rom", main);
